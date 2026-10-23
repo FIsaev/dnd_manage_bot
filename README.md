@@ -22,7 +22,27 @@ quote underneath.
 | `2d4(-5)`     | **a die never goes below 0** → `0 + 0 = 0`, not `-7` |
 | `(2d6+1d4)*2` | two dice terms in brackets → ordinary grouping, nothing per-die |
 
-Also supported: `d20` (count defaults to 1), `d%` (= d100), `*` and `/`,
+## Keeping the best or worst dice
+
+| You write    | Meaning                                              |
+| ------------ | ---------------------------------------------------- |
+| `4d6kh3`     | roll 4d6, sum the best 3 — the classic stat roll     |
+| `2d20kh1`    | advantage; a bare `kh` means `kh1`                   |
+| `2d20kl1`    | disadvantage                                         |
+| `4d6kh3(+1)` | +1 on each **kept** die; dropped dice contribute nothing |
+
+Dropped dice stay visible in the calculation path inside `[brackets]`:
+
+```
+4d6kh3: 3, 4, 6, [2]  ->  sum = 13
+```
+
+Which dice are kept is decided on the raw faces, and a per-die modifier shifts
+every die equally, so it can never change the choice. Ties go to the die rolled
+first. `4d6k3` (Roll20 style) is not accepted — write `kh`/`kl` explicitly,
+because a bare `k` is what Russian players type for `d`.
+
+Also supported: `kh`/`kl` (below), `d20` (count defaults to 1), `d%` (= d100), `*` and `/`,
 negative terms (`-d4+10`), nested brackets, and `3к6` / `3д6` for `3d6`.
 A note after `#` or `;` is echoed back: `2d6+3 # sneak attack`.
 
@@ -88,7 +108,7 @@ python -m unittest discover -p "test_*.py"
 
 - `dice.py` — tokenizer, parser, roller, calculation path. No dependencies.
 - `bot.py` — Telegram layer: the message gate and the reply layout.
-- `test_dice.py`, `test_bot.py` — 45 tests, rolls scripted so they are exact.
+- `test_dice.py`, `test_bot.py` — 61 tests, rolls scripted so they are exact.
 
 ## Limits (abuse guards)
 
@@ -97,5 +117,4 @@ python -m unittest discover -p "test_*.py"
 
 ## Not in this beta
 
-Keep highest/lowest (`4d6kh3`, advantage), exploding dice, re-roll buttons,
-per-chat defaults, nat-20/nat-1 highlighting.
+Exploding dice, re-roll buttons, per-chat defaults, nat-20/nat-1 highlighting.

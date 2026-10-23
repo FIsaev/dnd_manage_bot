@@ -15,7 +15,18 @@ import dice
 
 class Gate(unittest.TestCase):
     def test_answers_bare_expressions(self):
-        for text in ["3d6+1", "3d6(+1)", "(3d6+1)", "d20 + 5", "2d6(-1)*2", "d%", "3к6"]:
+        for text in [
+            "3d6+1",
+            "3d6(+1)",
+            "(3d6+1)",
+            "d20 + 5",
+            "2d6(-1)*2",
+            "d%",
+            "3к6",
+            "4d6kh3",
+            "2d20kh1",
+            "4d6kl2+1",
+        ]:
             with self.subTest(text=text):
                 self.assertTrue(bot.looks_like_a_roll(text))
 

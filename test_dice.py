@@ -95,6 +95,89 @@ class BonusPlacement(unittest.TestCase):
         self.assertEqual(result.total, 14)
 
 
+class Keeping(unittest.TestCase):
+    def test_keeps_the_best_three_of_four(self):
+        result = dice.roll("4d6kh3", FixedRng([5, 2, 6, 3]))
+        self.assertEqual(result.total, 14)
+        self.assertEqual(result.terms[0].dropped, [1])
+
+    def test_advantage(self):
+        result = dice.roll("2d20kh1", FixedRng([7, 18]))
+        self.assertEqual(result.total, 18)
+
+    def test_disadvantage(self):
+        result = dice.roll("2d20kl1", FixedRng([7, 18]))
+        self.assertEqual(result.total, 7)
+
+    def test_bare_kh_keeps_one(self):
+        result = dice.roll("2d20kh", FixedRng([7, 18]))
+        self.assertEqual(result.total, 18)
+        self.assertEqual(result.terms[0].src, "2d20kh1")
+
+    def test_keeps_the_worst_two(self):
+        result = dice.roll("4d6kl2", FixedRng([5, 2, 6, 3]))
+        self.assertEqual(result.total, 5)
+        self.assertEqual(result.terms[0].kept, [1, 3])
+
+    def test_ties_keep_the_die_rolled_first(self):
+        result = dice.roll("3d6kh2", FixedRng([6, 6, 6]))
+        self.assertEqual(result.terms[0].kept, [0, 1])
+
+    def test_caps_are_fine(self):
+        result = dice.roll("2D20KH1", FixedRng([7, 18]))
+        self.assertEqual(result.total, 18)
+
+    def test_per_die_bonus_only_touches_kept_dice(self):
+        result = dice.roll("4d6kh3(+1)", FixedRng([5, 2, 6, 3]))
+        self.assertEqual(result.total, 17)
+
+    def test_bonus_and_keep_in_either_order(self):
+        faces = [5, 2, 6, 3]
+        attached = dice.roll("4d6kh3(+1)", FixedRng(faces))
+        reversed_order = dice.roll("4d6(+1)kh3", FixedRng(faces))
+        self.assertEqual(attached.total, reversed_order.total)
+        self.assertEqual(attached.terms[0].src, reversed_order.terms[0].src)
+
+    def test_keep_survives_a_folded_bracket_bonus(self):
+        result = dice.roll("(4d6kh3+1)", FixedRng([5, 2, 6, 3]))
+        self.assertEqual(result.total, 17)
+        self.assertEqual(result.terms[0].src, "4d6kh3(+1)")
+
+    def test_keep_combines_with_final_maths(self):
+        result = dice.roll("4d6kh3+2", FixedRng([5, 2, 6, 3]))
+        self.assertEqual(result.total, 16)
+
+    def test_floor_applies_to_the_kept_dice(self):
+        # keeps 6 and 2, then -5 each: max(0, 1) + max(0, -3)
+        result = dice.roll("3d6kh2(-5)", FixedRng([1, 6, 2]))
+        self.assertEqual(result.total, 1)
+        self.assertTrue(result.terms[0].floored)
+
+    def test_dropped_dice_are_bracketed_in_the_calc_path(self):
+        result = dice.roll("4d6kh3", FixedRng([5, 2, 6, 3]))
+        self.assertEqual(result.detail_lines(), ["4d6kh3: 5, [2], 6, 3  ->  sum = 14"])
+
+    def test_advantage_calc_path_has_no_sum_label(self):
+        result = dice.roll("2d20kh1+5", FixedRng([7, 18]))
+        self.assertEqual(
+            result.detail_lines(),
+            ["2d20kh1: [7], 18  ->  18", "18 + 5 = 23"],
+        )
+
+    def test_calc_path_with_keep_and_bonus(self):
+        result = dice.roll("4d6kh3(+1)", FixedRng([5, 2, 6, 3]))
+        self.assertEqual(
+            result.detail_lines(),
+            ["4d6kh3(+1): 5, [2], 6, 3  (+1 each)  ->  6 + 7 + 4 = 17"],
+        )
+
+    def test_rejections(self):
+        for text in ["2d20kh3", "4d6kh0", "4d6kh3kl2", "4d6k3", "4d6kh3kh1", "kh3"]:
+            with self.subTest(text=text):
+                with self.assertRaises(dice.DiceError):
+                    dice.roll(text, FixedRng([1, 2, 3, 4]))
+
+
 class Arithmetic(unittest.TestCase):
     def test_implicit_single_die(self):
         result = dice.roll("d20+5", FixedRng([14]))

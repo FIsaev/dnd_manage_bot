@@ -34,7 +34,7 @@ MAX_INPUT = dice.MAX_EXPR_LEN
 # A plain group message is answered only when the whole message is an
 # expression -- nothing but dice, numbers, brackets and operators. That keeps
 # the bot quiet during normal chat.
-EXPRESSION_ONLY = re.compile(r"^[0-9dD%+\-*/()\sкКдД]+$")
+EXPRESSION_ONLY = re.compile(r"^[0-9dDkKhHlL%+\-*/()\sкКдД]+$")
 
 # Optional trailing note: "2d6+3 # sneak attack"
 NOTE = re.compile(r"\s*[#;]\s*(.*)$", re.DOTALL)
@@ -48,6 +48,10 @@ HELP = (
     "<code>3d6(+1)</code> - +1 to <i>every die</i>, then sum\n"
     "<code>(3d6+1)</code> - same as above: a +/- in brackets belongs to each die\n"
     "<code>2d4(-5)</code> - a die never goes below 0, so this is 0\n\n"
+    "<b>Keep the best or worst dice</b>\n"
+    "<code>4d6kh3</code> - sum the best 3 of 4, drop the rest\n"
+    "<code>2d20kh1</code> - advantage, <code>2d20kl1</code> - disadvantage\n"
+    "Dropped dice show up in [brackets] in the calculation.\n\n"
     "<b>More</b>\n"
     "<code>d20+5</code>, <code>2d6(-1)*2</code>, <code>(2d6+1d4)*2</code>, "
     "<code>d%</code>, <code>4d6/2</code>\n"

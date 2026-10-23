@@ -6,7 +6,8 @@ Grammar
     term    := unary (('*' | '/') unary)*
     unary   := ('+' | '-')? atom
     atom    := NUMBER | dice | '(' expr ')'
-    dice    := NUMBER? 'd' (NUMBER | '%') per_die?
+    dice    := NUMBER? 'd' (NUMBER | '%') (keep | per_die)*
+    keep    := ('kh' | 'kl') NUMBER?
     per_die := '(' ('+' | '-') NUMBER (('+' | '-') NUMBER)* ')'
 
 Bonus rules (the whole point of this bot)
@@ -23,6 +24,16 @@ term plus plain numbers; otherwise brackets are ordinary math grouping:
 
 A per-die debuff never takes a die below 0: 2d4(-5) contributes 0, not -7.
 Maths outside the dice is untouched, so a final -10 can still go negative.
+
+Keeping the best or worst dice
+------------------------------
+    4d6kh3      -> roll 4d6, sum the best 3 (the classic stat roll)
+    2d20kh1     -> advantage; a bare kh means kh1
+    2d20kl      -> disadvantage
+    4d6kh3(+1)  -> +1 on each kept die; dropped dice contribute nothing
+
+Which dice are kept is decided on the raw faces, and a per-die modifier shifts
+every die equally, so it can never change the choice.
 
 Cyrillic dice notation is accepted too: 3k6 / 3d6 written with Russian letters.
 """
@@ -59,6 +70,8 @@ class Dice:
     sides: int
     per_die: int = 0
     src: str = ""
+    keep: int | None = None  # how many dice to keep; None keeps all
+    keep_high: bool = True
 
 
 @dataclass
@@ -77,7 +90,7 @@ class Neg:
 
 # Russian players often type the die with a Cyrillic letter: 3k6 / 3d6.
 _CYRILLIC_D = str.maketrans({"к": "d", "К": "d", "д": "d", "Д": "d"})
-_TOKEN_RE = re.compile(r"\d+|[dD]|%|[-+*/()]|\s+")
+_TOKEN_RE = re.compile(r"\d+|[kK][hHlL]|[dD]|%|[-+*/()]|\s+")
 
 
 def _tokenize(text: str) -> list[tuple[str, str]]:
@@ -86,6 +99,8 @@ def _tokenize(text: str) -> list[tuple[str, str]]:
     while pos < len(text):
         match = _TOKEN_RE.match(text, pos)
         if match is None:
+            if text[pos] in "kK":
+                raise DiceError("write kh or kl, as in 4d6kh3 or 2d20kl1")
             raise DiceError("I do not understand %r (position %d)" % (text[pos], pos + 1))
         raw = match.group()
         pos = match.end()
@@ -93,6 +108,8 @@ def _tokenize(text: str) -> list[tuple[str, str]]:
             continue
         if raw.isdigit():
             tokens.append(("num", raw))
+        elif raw.lower() in ("kh", "kl"):
+            tokens.append(("keep", raw.lower()))
         elif raw in "dD":
             tokens.append(("d", raw))
         elif raw == "%":
@@ -206,16 +223,48 @@ class _Parser:
         if self.total_dice > MAX_TOTAL_DICE:
             raise DiceError("at most %d dice per roll" % MAX_TOTAL_DICE)
 
-        per_die = self.per_die_group()
-        src = "%sd%s" % (count_text, sides_text)
+        # kh3 and (+1) may come in either order, and either may be missing.
+        keep: int | None = None
+        keep_high = True
+        keep_text = ""
+        per_die = 0
+        while True:
+            if self.peek()[0] == "keep":
+                if keep is not None:
+                    raise DiceError("only one kh/kl per die")
+                suffix = self.take()[1]
+                keep_high = suffix.endswith("h")
+                keep = int(self.take()[1]) if self.peek()[0] == "num" else 1
+                keep_text = "%s%d" % (suffix, keep)
+                continue
+            group = self.per_die_group()
+            if group is not None:
+                per_die += group
+                continue
+            break
+
+        if keep is not None:
+            if keep < 1:
+                raise DiceError("keep at least one die")
+            if keep > count:
+                raise DiceError("cannot keep %d of %d dice" % (keep, count))
+
+        src = "%sd%s%s" % (count_text, sides_text, keep_text)
         if per_die:
             src += "(%+d)" % per_die
-        return Dice(count=count, sides=sides, per_die=per_die, src=src)
+        return Dice(
+            count=count,
+            sides=sides,
+            per_die=per_die,
+            src=src,
+            keep=keep,
+            keep_high=keep_high,
+        )
 
-    def per_die_group(self) -> int:
-        """Parse an attached (+1) / (-2+1) modifier, if there is one."""
+    def per_die_group(self) -> int | None:
+        """Parse an attached (+1) / (-2+1) modifier. None when there is none."""
         if self.peek()[0] != "(" or self.peek(1)[0] not in ("+", "-"):
-            return 0
+            return None
         self.take()
         total = 0
         while self.peek()[0] in ("+", "-"):
@@ -252,7 +301,14 @@ def _fold_per_die(node: object) -> object:
     src = re.sub(r"\([-+][^()]*\)$", "", die.src)
     if per_die:
         src += "(%+d)" % per_die
-    return Dice(count=die.count, sides=die.sides, per_die=per_die, src=src)
+    return Dice(
+        count=die.count,
+        sides=die.sides,
+        per_die=per_die,
+        src=src,
+        keep=die.keep,
+        keep_high=die.keep_high,
+    )
 
 
 def parse(text: str) -> object:
@@ -275,16 +331,39 @@ class DieTerm:
     sides: int
     per_die: int
     faces: list[int]
+    keep: int | None = None
+    keep_high: bool = True
+
+    @property
+    def kept(self) -> list[int]:
+        """Indexes of the dice that count, in roll order.
+
+        Ties go to the die rolled first, so the choice is reproducible.
+        """
+        if self.keep is None:
+            return list(range(len(self.faces)))
+        best_first = sorted(
+            range(len(self.faces)),
+            key=lambda index: self.faces[index],
+            reverse=self.keep_high,
+        )
+        return sorted(best_first[: self.keep])
+
+    @property
+    def dropped(self) -> list[int]:
+        """Indexes of the dice kh/kl threw away."""
+        kept = set(self.kept)
+        return [index for index in range(len(self.faces)) if index not in kept]
 
     @property
     def modified(self) -> list[int]:
-        """Each die after its own bonus/debuff. A die never falls below 0."""
-        return [max(0, face + self.per_die) for face in self.faces]
+        """Each kept die after its own bonus/debuff, never below 0."""
+        return [max(0, self.faces[index] + self.per_die) for index in self.kept]
 
     @property
     def floored(self) -> bool:
-        """True when a debuff pushed at least one die below 0."""
-        return any(face + self.per_die < 0 for face in self.faces)
+        """True when a debuff pushed at least one kept die below 0."""
+        return any(self.faces[index] + self.per_die < 0 for index in self.kept)
 
     @property
     def total(self) -> int:
@@ -315,7 +394,14 @@ def _eval(node: object, rng: random.Random, terms: list[DieTerm]) -> _Ev:
 
     if isinstance(node, Dice):
         faces = [rng.randint(1, node.sides) for _ in range(node.count)]
-        term = DieTerm(src=node.src, sides=node.sides, per_die=node.per_die, faces=faces)
+        term = DieTerm(
+            src=node.src,
+            sides=node.sides,
+            per_die=node.per_die,
+            faces=faces,
+            keep=node.keep,
+            keep_high=node.keep_high,
+        )
         terms.append(term)
         return _Ev(Fraction(term.total), str(term.total), 0)
 
@@ -362,20 +448,28 @@ class RollResult:
         """The full calculation path, one step per line."""
         lines = []
         for term in self.terms:
-            rolled = ", ".join(str(face) for face in term.faces)
-            if term.per_die:
-                summed = " + ".join(str(value) for value in term.modified)
-                note = "%+d each" % term.per_die
-                if term.floored:
-                    note += ", min 0"
-                lines.append(
-                    "%s: %s  (%s)  ->  %s = %d"
-                    % (term.src, rolled, note, summed, term.total)
-                )
-            elif len(term.faces) == 1:
+            dropped = set(term.dropped)
+            rolled = ", ".join(
+                "[%d]" % face if index in dropped else str(face)
+                for index, face in enumerate(term.faces)
+            )
+            if len(term.faces) == 1 and not term.per_die:
                 lines.append("%s: %s" % (term.src, rolled))
+                continue
+            note = ""
+            if term.per_die:
+                note = "  (%+d each%s)" % (
+                    term.per_die,
+                    ", min 0" if term.floored else "",
+                )
+            kept = term.modified
+            if len(kept) == 1:
+                outcome = str(term.total)
+            elif term.per_die:
+                outcome = "%s = %d" % (" + ".join(str(v) for v in kept), term.total)
             else:
-                lines.append("%s: %s  ->  sum = %d" % (term.src, rolled, term.total))
+                outcome = "sum = %d" % term.total
+            lines.append("%s: %s%s  ->  %s" % (term.src, rolled, note, outcome))
         if self.calc != self.total_text:
             lines.append("%s = %s" % (self.calc, self.total_text))
         return lines
