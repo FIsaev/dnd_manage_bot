@@ -1,0 +1,29 @@
+# A VPS without Docker:
+#   sudo cp deploy/dnd-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dnd-bot
+#   journalctl -u dnd-bot -f
+#
+# Expects the repo in /opt/dnd_manage_bot with a venv beside it and the token
+# in /opt/dnd_manage_bot/.env (chmod 600, owned by the dndbot user).
+[Unit]
+Description=D&D dice bot for Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dndbot
+WorkingDirectory=/opt/dnd_manage_bot
+EnvironmentFile=/opt/dnd_manage_bot/.env
+ExecStart=/opt/dnd_manage_bot/venv/bin/python bot.py
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

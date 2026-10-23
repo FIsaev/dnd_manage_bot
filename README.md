@@ -92,6 +92,83 @@ environment instead. Windows PowerShell 5.1 has no `&&` — chain with `;`, or
   python-telegram-bot 21.x on Python 3.13/3.14. `requirements.txt` asks for
   22.x, which supports them; run `pip install --upgrade -r requirements.txt`.
 
+## Hosting
+
+Long polling is the default, so the bot needs **no inbound port, no domain and
+no TLS** — anything that keeps a process alive will do. Run exactly one
+instance: two processes polling the same token make Telegram reject one with
+`409 Conflict`. Never commit `.env`; set the token in the host's own
+environment or secrets UI.
+
+### Docker, on any VPS
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
+
+The token is read from `.env` at run time and never baked into the image
+(`.dockerignore` keeps it out), the bot restarts unless you stop it yourself,
+and the log files are capped at 3 x 10 MB.
+
+### A VPS without Docker
+
+`deploy/dnd-bot.service` is a ready systemd unit: restart on failure,
+`NoNewPrivileges`, read-only system. Put the repo in `/opt/dnd_manage_bot`
+with a venv beside it, then:
+
+```bash
+sudo cp deploy/dnd-bot.service /etc/systemd/system/
+sudo systemctl enable --now dnd-bot
+journalctl -u dnd-bot -f
+```
+
+### Render
+
+A Render web service must open a port, and polling never opens one — that is
+exactly the `no open ports detected` deploy failure. Two ways out:
+
+1. **Web service in webhook mode** — works on the free plan. `render.yaml` sets
+   this up: build `pip install -r requirements.txt`, start `python bot.py`.
+   Render injects `PORT` (10000 by default) and the bot binds it on `0.0.0.0`.
+   Set `BOT_TOKEN` and `WEBHOOK_URL` under Environment, where `WEBHOOK_URL` is
+   the service's own address plus a path —
+   `https://<service-name>.onrender.com/telegram` — then redeploy. Render does
+   not read `Procfile`, so the start command comes from `render.yaml` or the
+   dashboard.
+2. **Background worker in polling mode** — paid, but nothing to configure: no
+   port, no public URL, no webhook variables.
+
+Free-plan caveat: a free web service spins down after 15 minutes without
+inbound traffic and takes about a minute to wake up, so the first roll after a
+quiet spell arrives late or not at all — Telegram will not wait that long for
+the webhook. Pinging the URL from outside every ~10 minutes keeps it awake and
+costs about 744 instance hours a month, just inside the 750 free hours, as long
+as it is the only free service in the workspace.
+
+### Other PaaS: Railway, Fly, Heroku
+
+`Procfile` declares a `worker` process and `.python-version` pins the runtime.
+Set `BOT_TOKEN` in the platform's variables, deploy, and keep the instance
+count at 1. Choose a **worker / background** service, not a web service.
+
+If the platform only sells web services and insists on an open port, switch to
+webhook mode with these variables:
+
+| Variable         | Value                                                     |
+| ---------------- | --------------------------------------------------------- |
+| `WEBHOOK_URL`    | public https URL, e.g. `https://your-app.onrender.com/telegram` |
+| `PORT`           | normally injected by the platform (default 8080)          |
+| `WEBHOOK_SECRET` | optional random string Telegram echoes back in a header   |
+
+The URL path is derived from `WEBHOOK_URL`, so there is nothing else to wire
+up. Removing `WEBHOOK_URL` returns the bot to polling — python-telegram-bot
+deletes the webhook on every polling start, so switching modes needs no
+cleanup.
+
+Serverless (Lambda, Cloud Functions) does not fit this beta: polling wants a
+long-lived process and webhook mode expects a persistent server.
+
 ## Trying it without a token
 
 ```bash
@@ -108,7 +185,9 @@ python -m unittest discover -p "test_*.py"
 
 - `dice.py` — tokenizer, parser, roller, calculation path. No dependencies.
 - `bot.py` — Telegram layer: the message gate and the reply layout.
-- `test_dice.py`, `test_bot.py` — 61 tests, rolls scripted so they are exact.
+- `test_dice.py`, `test_bot.py` — 62 tests, rolls scripted so they are exact.
+- `Dockerfile`, `compose.yaml`, `Procfile`, `render.yaml`, `.python-version`,
+  `deploy/dnd-bot.service` — deployment, see Hosting above.
 
 ## Limits (abuse guards)
 

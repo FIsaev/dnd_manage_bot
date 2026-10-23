@@ -4,6 +4,14 @@ Watches group messages, answers anything that looks like a dice expression with
 the result, and hides the full calculation path in an expandable blockquote.
 
     BOT_TOKEN=123:ABC python bot.py
+
+Environment:
+    BOT_TOKEN       required; from @BotFather (or put it in .env)
+    WEBHOOK_URL     optional; the bot's public https URL. Set it only on hosts
+                    that require an open port, otherwise long polling is used
+                    and no inbound traffic is needed at all.
+    PORT            the port to listen on in webhook mode (default 8080)
+    WEBHOOK_SECRET  optional shared secret Telegram sends back in a header
 """
 
 from __future__ import annotations
@@ -14,6 +22,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -154,6 +163,11 @@ def load_token() -> str:
     sys.exit("No BOT_TOKEN. Put it in .env (see .env.example) or the environment.")
 
 
+def webhook_path(url: str) -> str:
+    """The path Telegram posts updates to, taken from the public URL."""
+    return urlparse(url).path.strip("/")
+
+
 def main() -> None:
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -167,7 +181,29 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_error_handler(on_error)
 
-    log.info("dice bot is up (beta)")
+    webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
+    if webhook_url:
+        port = int(os.environ.get("PORT", "8080"))
+        log.info("dice bot is up (beta): webhook at %s, listening on %d", webhook_url, port)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=webhook_path(webhook_url),
+            webhook_url=webhook_url,
+            secret_token=os.environ.get("WEBHOOK_SECRET", "").strip() or None,
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+        )
+        return
+
+    if os.environ.get("PORT"):
+        log.warning(
+            "PORT is set but WEBHOOK_URL is not. Long polling never opens a port, "
+            "so a host that waits for one (a Render web service, say) will fail the "
+            "deploy with 'no open ports detected'. Set WEBHOOK_URL to the public "
+            "https URL of this service, or deploy it as a background worker."
+        )
+    log.info("dice bot is up (beta): long polling")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 

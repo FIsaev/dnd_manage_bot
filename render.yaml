@@ -1,0 +1,28 @@
+# Render Blueprint.
+#
+# A Render web service must open a port, and long polling never opens one, so
+# this deploys the bot in webhook mode. Render injects PORT (10000 by default)
+# and bot.py binds it on 0.0.0.0.
+#
+# WEBHOOK_URL is the service's own public URL plus a path, which you only know
+# after the service exists:  https://<service-name>.onrender.com/telegram
+# Set it (and BOT_TOKEN) in Environment, then redeploy.
+#
+# On a paid plan, prefer "type: worker" with no webhook variables at all:
+# polling needs no port and no public URL.
+services:
+  - type: web
+    name: dnd-manage-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      # Optional: any random string. Telegram echoes it back in a header and
+      # the bot rejects requests without it. Leave empty to skip the check.
+      - key: WEBHOOK_SECRET
+        sync: false

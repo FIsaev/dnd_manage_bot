@@ -1,3 +1,5 @@
+# Pinned exactly, so a deploy installs what was tested here.
 # 22.x is the first line that supports Python 3.13/3.14; 21.x calls
 # asyncio.get_event_loop(), which raises on 3.14.
-python-telegram-bot>=22.0,<23.0
+# The [webhooks] extra adds tornado, needed only when WEBHOOK_URL is set.
+python-telegram-bot[webhooks]==22.8

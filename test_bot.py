@@ -71,6 +71,19 @@ class Layout(unittest.TestCase):
         self.assertIn("&lt;b&gt;", bot.render(result, "<b>boom</b>"))
 
 
+class Webhook(unittest.TestCase):
+    def test_path_is_taken_from_the_public_url(self):
+        cases = {
+            "https://bot.example.com/telegram": "telegram",
+            "https://bot.example.com/hook/v1/": "hook/v1",
+            "https://bot.example.com/": "",
+            "https://bot.example.com": "",
+        }
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                self.assertEqual(bot.webhook_path(url), expected)
+
+
 class Wiring(unittest.TestCase):
     def test_reply_text_takes_do_quote(self):
         self.assertIn("do_quote", inspect.signature(Message.reply_text).parameters)
