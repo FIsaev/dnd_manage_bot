@@ -9,8 +9,10 @@ Environment:
     BOT_TOKEN       required; from @BotFather (or put it in .env)
     WEBHOOK_URL     optional; the bot's public https URL. Set it only on hosts
                     that require an open port, otherwise long polling is used
-                    and no inbound traffic is needed at all.
-    PORT            the port to listen on in webhook mode (default 8080)
+                    and no inbound traffic is needed at all. On Render it can
+                    be left out: RENDER_EXTERNAL_URL is used instead.
+    PORT            the port to listen on in webhook mode (default 10000,
+                    which is what Render expects)
     WEBHOOK_SECRET  optional shared secret Telegram sends back in a header
 """
 
@@ -21,6 +23,7 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -168,6 +171,28 @@ def webhook_path(url: str) -> str:
     return urlparse(url).path.strip("/")
 
 
+def resolve_webhook_url(env: Mapping[str, str]) -> str:
+    """The public https URL to receive updates on, or "" for long polling.
+
+    WEBHOOK_URL wins. Render fills RENDER_EXTERNAL_URL with the service's own
+    address for web services, and leaves it empty for background workers, so a
+    Render web service needs no URL of its own.
+    """
+    explicit = env.get("WEBHOOK_URL", "").strip()
+    if explicit:
+        return explicit
+    external = env.get("RENDER_EXTERNAL_URL", "").strip()
+    if external:
+        return "%s/telegram" % external.rstrip("/")
+    return ""
+
+
+def resolve_port(env: Mapping[str, str]) -> int:
+    """The port to listen on: whatever the host asks for, else Render's 10000."""
+    asked = env.get("PORT", "").strip()
+    return int(asked) if asked else 10000
+
+
 def main() -> None:
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -181,9 +206,9 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_error_handler(on_error)
 
-    webhook_url = os.environ.get("WEBHOOK_URL", "").strip()
+    webhook_url = resolve_webhook_url(os.environ)
     if webhook_url:
-        port = int(os.environ.get("PORT", "8080"))
+        port = resolve_port(os.environ)
         log.info("dice bot is up (beta): webhook at %s, listening on %d", webhook_url, port)
         app.run_webhook(
             listen="0.0.0.0",

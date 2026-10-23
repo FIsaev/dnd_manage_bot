@@ -128,16 +128,41 @@ journalctl -u dnd-bot -f
 A Render web service must open a port, and polling never opens one — that is
 exactly the `no open ports detected` deploy failure. Two ways out:
 
-1. **Web service in webhook mode** — works on the free plan. `render.yaml` sets
-   this up: build `pip install -r requirements.txt`, start `python bot.py`.
-   Render injects `PORT` (10000 by default) and the bot binds it on `0.0.0.0`.
-   Set `BOT_TOKEN` and `WEBHOOK_URL` under Environment, where `WEBHOOK_URL` is
-   the service's own address plus a path —
-   `https://<service-name>.onrender.com/telegram` — then redeploy. Render does
-   not read `Procfile`, so the start command comes from `render.yaml` or the
-   dashboard.
+1. **Web service in webhook mode** — works on the free plan, and `BOT_TOKEN` is
+   the only variable to set. Render puts the service's own address into
+   `RENDER_EXTERNAL_URL`, and the bot appends `/telegram` to it, so there is no
+   URL to look up and no chicken-and-egg on the first deploy. Listening happens
+   on `0.0.0.0` and on `PORT` when Render provides it, otherwise on 10000,
+   which is what Render expects. Set `WEBHOOK_URL` yourself only to override
+   that (a custom domain, for instance). Render does not read `Procfile`.
 2. **Background worker in polling mode** — paid, but nothing to configure: no
    port, no public URL, no webhook variables.
+
+`render.yaml` in the repo describes option 1 with **Language = Docker**: Render
+builds `./Dockerfile` and runs its `CMD`, so no build or start command is
+involved, and the container that runs on Render is the one you can run locally.
+Either apply the blueprint (New → Blueprint, pick this repo) or create the
+service by hand with Language `Docker` and leave the commands empty. Docker
+builds do use the included build pipeline minutes. For the plain Python runtime
+instead, swap the two `docker` lines in `render.yaml` for `runtime: python`
+plus `buildCommand` / `startCommand` — the comment in the file spells it out.
+
+Check the image Render will build, before pushing:
+
+```bash
+docker build -t dnd-bot .
+docker run --rm dnd-bot python -c "import bot, dice; print('image ok')"
+```
+
+Do not start the bot locally in polling mode while a webhook deploy is live:
+python-telegram-bot deletes the webhook whenever polling starts, so the
+deployed instance would quietly stop receiving anything. Redeploy or restart
+the Render service to register the webhook again, and check the current state
+with `getWebhookInfo`:
+
+```bash
+curl "https://api.telegram.org/bot<token>/getWebhookInfo"
+```
 
 Free-plan caveat: a free web service spins down after 15 minutes without
 inbound traffic and takes about a minute to wake up, so the first roll after a
@@ -157,8 +182,8 @@ webhook mode with these variables:
 
 | Variable         | Value                                                     |
 | ---------------- | --------------------------------------------------------- |
-| `WEBHOOK_URL`    | public https URL, e.g. `https://your-app.onrender.com/telegram` |
-| `PORT`           | normally injected by the platform (default 8080)          |
+| `WEBHOOK_URL`    | public https URL, e.g. `https://your-app.fly.dev/telegram`; on Render it is filled in from `RENDER_EXTERNAL_URL` |
+| `PORT`           | normally injected by the platform (default 10000)         |
 | `WEBHOOK_SECRET` | optional random string Telegram echoes back in a header   |
 
 The URL path is derived from `WEBHOOK_URL`, so there is nothing else to wire
@@ -185,7 +210,7 @@ python -m unittest discover -p "test_*.py"
 
 - `dice.py` — tokenizer, parser, roller, calculation path. No dependencies.
 - `bot.py` — Telegram layer: the message gate and the reply layout.
-- `test_dice.py`, `test_bot.py` — 62 tests, rolls scripted so they are exact.
+- `test_dice.py`, `test_bot.py` — 67 tests, rolls scripted so they are exact.
 - `Dockerfile`, `compose.yaml`, `Procfile`, `render.yaml`, `.python-version`,
   `deploy/dnd-bot.service` — deployment, see Hosting above.
 

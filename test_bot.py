@@ -84,6 +84,36 @@ class Webhook(unittest.TestCase):
                 self.assertEqual(bot.webhook_path(url), expected)
 
 
+class WebhookUrl(unittest.TestCase):
+    def test_an_explicit_url_wins(self):
+        env = {
+            "WEBHOOK_URL": "https://mine.example.com/hook",
+            "RENDER_EXTERNAL_URL": "https://ignored.onrender.com",
+        }
+        self.assertEqual(bot.resolve_webhook_url(env), "https://mine.example.com/hook")
+
+    def test_render_supplies_the_services_own_url(self):
+        env = {"RENDER_EXTERNAL_URL": "https://dnd-manage-bot.onrender.com"}
+        self.assertEqual(
+            bot.resolve_webhook_url(env),
+            "https://dnd-manage-bot.onrender.com/telegram",
+        )
+
+    def test_a_trailing_slash_does_not_double_up(self):
+        env = {"RENDER_EXTERNAL_URL": "https://x.onrender.com/"}
+        self.assertEqual(bot.resolve_webhook_url(env), "https://x.onrender.com/telegram")
+
+    def test_nothing_set_means_long_polling(self):
+        # Render leaves RENDER_EXTERNAL_URL empty for background workers.
+        self.assertEqual(bot.resolve_webhook_url({"RENDER_EXTERNAL_URL": ""}), "")
+        self.assertEqual(bot.resolve_webhook_url({}), "")
+
+    def test_port_comes_from_the_host_or_falls_back_to_10000(self):
+        self.assertEqual(bot.resolve_port({"PORT": "8080"}), 8080)
+        self.assertEqual(bot.resolve_port({"PORT": ""}), 10000)
+        self.assertEqual(bot.resolve_port({}), 10000)
+
+
 class Wiring(unittest.TestCase):
     def test_reply_text_takes_do_quote(self):
         self.assertIn("do_quote", inspect.signature(Message.reply_text).parameters)
